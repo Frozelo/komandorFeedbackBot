@@ -45,7 +45,8 @@ func (b *Bot) handleMessage(update tgbotapi.Update) {
 		if nextQuestion != nil {
 			msg.Text = nextQuestion.Text
 		} else {
-			msg.Text = "Спасибо за ваши ответы!"
+			msg.Text = "Спасибо за ваши ответы! Вот ваши результаты:\n"
+			msg.Text += b.surveyService.GetSurveyResults(int(chatID))
 		}
 	}
 

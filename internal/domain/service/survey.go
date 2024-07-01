@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/Frozelo/komandorFeedbackBot/internal/domain/entity"
@@ -63,4 +64,22 @@ func (s *SurveyService) AnswerQuestion(chatID int, answer string) {
 			break
 		}
 	}
+}
+
+func (s *SurveyService) GetSurveyResults(chatID int) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	survey, exists := s.surveys[chatID]
+
+	if !exists {
+		return "Результат не найдены."
+	}
+	results := ""
+
+	for _, q := range survey.Questions {
+		results += fmt.Sprintf("%s: %s\n", q.Text, q.Answer)
+	}
+
+	return results
 }
