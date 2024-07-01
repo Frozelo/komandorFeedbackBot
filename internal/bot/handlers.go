@@ -1,23 +1,68 @@
 package bot
 
-import tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+import (
+	"log"
 
-type BotHandler struct {
-	bot *tgbotapi.BotAPI
+	"github.com/Frozelo/komandorFeedbackBot/internal/domain/service"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+)
+
+type Bot struct {
+	api           *tgbotapi.BotAPI
+	surveyService *service.SurveyService
 }
 
-func NewBotHandler(bot *tgbotapi.BotAPI) *BotHandler {
-	return &BotHandler{bot: bot}
+func NewBot(token string) (*Bot, error) {
+	api, err := tgbotapi.NewBotAPI(token)
+	if err != nil {
+		return nil, err
+	}
+
+	api.Debug = true
+
+	return &Bot{
+		api:           api,
+		surveyService: service.NewSurveyService(),
+	}, nil
 }
 
-func (bh *BotHandler) HandleCommands(message *tgbotapi.Message) {
-	switch message.Command() {
-	case "start":
-		bh.bot.Send(tgbotapi.NewMessage(message.Chat.ID, "You just entered the start command!"))
-	case "test":
-		bh.bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Wow! Very rare command!"))
+func (b *Bot) handleMessage(update tgbotapi.Update) {
+	msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
+	chatID := update.Message.Chat.ID
 
+	switch update.Message.Text {
+	case "/start":
+		b.surveyService.StartSurvey(int(chatID))
+		nextQuestion := b.surveyService.GetNextQuestion(int(chatID))
+		if nextQuestion != nil {
+			msg.Text = nextQuestion.Text
+		} else {
+			msg.Text = "Нет доступных вопросов."
+		}
 	default:
-		bh.bot.Send(tgbotapi.NewMessage(message.Chat.ID, "Unknown command!"))
+		b.surveyService.AnswerQuestion(int(chatID), update.Message.Text)
+		nextQuestion := b.surveyService.GetNextQuestion(int(chatID))
+		if nextQuestion != nil {
+			msg.Text = nextQuestion.Text
+		} else {
+			msg.Text = "Спасибо за ваши ответы!"
+		}
+	}
+
+	if _, err := b.api.Send(msg); err != nil {
+		log.Printf("Failed to send message: %v", err)
+	}
+}
+
+func (b *Bot) Start() {
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 60
+
+	updates := b.api.GetUpdatesChan(u)
+
+	for update := range updates {
+		if update.Message != nil {
+			b.handleMessage(update)
+		}
 	}
 }
