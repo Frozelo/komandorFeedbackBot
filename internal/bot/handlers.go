@@ -2,56 +2,60 @@ package bot
 
 import (
 	"log"
+	"time"
 
+	"github.com/Frozelo/komandorFeedbackBot/internal/domain/entity"
 	"github.com/Frozelo/komandorFeedbackBot/internal/domain/service"
+	"github.com/Frozelo/komandorFeedbackBot/internal/repository"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/jackc/pgx/v4"
 )
 
 type Bot struct {
 	api           *tgbotapi.BotAPI
+	userService   *service.UserService
 	surveyService *service.SurveyService
 }
 
-func NewBot(token string) (*Bot, error) {
+func NewBot(db *pgx.Conn, token string) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, err
 	}
 
+	userRepo := repository.NewUserRepository(db)
+
 	api.Debug = true
 
 	return &Bot{
 		api:           api,
+		userService:   service.NewUserService(userRepo),
 		surveyService: service.NewSurveyService(),
 	}, nil
 }
 
 func (b *Bot) handleMessage(update tgbotapi.Update) {
 	msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
-	chatID := update.Message.Chat.ID
 
 	switch update.Message.Text {
 	case "/start":
-		b.surveyService.StartSurvey(int(chatID))
-		nextQuestion := b.surveyService.GetNextQuestion(int(chatID))
-		if nextQuestion != nil {
-			msg.Text = nextQuestion.Text
-		} else {
-			msg.Text = "Нет доступных вопросов."
+		joinedAt := time.Unix(int64(update.Message.Date), 0).Format("2006-01-02")
+		newUser := entity.User{
+			TgId:     int(update.Message.From.ID),
+			Username: update.Message.From.UserName,
+			JoinedAt: joinedAt,
 		}
-	default:
-		b.surveyService.AnswerQuestion(int(chatID), update.Message.Text)
-		nextQuestion := b.surveyService.GetNextQuestion(int(chatID))
-		if nextQuestion != nil {
-			msg.Text = nextQuestion.Text
-		} else {
-			msg.Text = "Спасибо за ваши ответы! Вот ваши результаты:\n"
-			msg.Text += b.surveyService.GetSurveyResults(int(chatID))
-		}
-	}
+		user, err := b.userService.CreateUser(newUser)
 
-	if _, err := b.api.Send(msg); err != nil {
-		log.Printf("Failed to send message: %v", err)
+		if err != nil {
+			msg.Text = "Ошибка при создании пользователя."
+			log.Printf("Error creating user: %v", err)
+
+		} else {
+			msg.Text = "Привет, " + user.Username + "! Ты уже зарегистрирован. Пришли мне /start_survey, чтобы начать опрос."
+		}
+		b.api.Send(msg)
+
 	}
 }
 

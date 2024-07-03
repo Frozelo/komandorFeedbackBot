@@ -25,7 +25,7 @@ func main() {
 
 	defer db.Close(context.Background())
 
-	b, err := bot.NewBot(cfg.Bot.ApiKey)
+	b, err := bot.NewBot(db, cfg.Bot.ApiKey)
 
 	if err != nil {
 		log.Fatal(err)

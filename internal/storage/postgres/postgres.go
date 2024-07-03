@@ -10,12 +10,6 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// const (
-// 	_defaultMaxPoolSize  = 1
-// 	_defaultConnAttempts = 10
-// 	_defaultConnTimeout  = time.Second
-// )
-
 func NewDb(cfg *bot.Config) (*pgx.Conn, error) {
 	connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
 		cfg.Database.Host, cfg.Database.Port, cfg.Database.User, cfg.Database.Password, cfg.Database.DatabaseName)
