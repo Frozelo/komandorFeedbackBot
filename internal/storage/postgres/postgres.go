@@ -1,21 +1,29 @@
 package postgres_storage
 
 import (
-	"time"
+	"context"
+	"fmt"
 
-	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/Frozelo/komandorFeedbackBot/internal/bot"
+	"github.com/jackc/pgx/v4"
+
+	_ "github.com/lib/pq"
 )
 
-const (
-	_defaultMaxPoolSize  = 1
-	_defaultConnAttempts = 10
-	_defaultConnTimeout  = time.Second
-)
+// const (
+// 	_defaultMaxPoolSize  = 1
+// 	_defaultConnAttempts = 10
+// 	_defaultConnTimeout  = time.Second
+// )
 
-type PostgresStorage struct {
-	maxPoolSize  int
-	connAttempts int
-	connTimeout  int
+func NewDb(cfg *bot.Config) (*pgx.Conn, error) {
+	connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
+		cfg.Database.Host, cfg.Database.Port, cfg.Database.User, cfg.Database.Password, cfg.Database.DatabaseName)
 
-	Pool *pgxpool.Pool
+	conn, err := pgx.Connect(context.Background(), connStr)
+	if err != nil {
+		return nil, err
+	}
+
+	return conn, nil
 }

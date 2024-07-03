@@ -56,6 +56,9 @@ func (b *Bot) handleMessage(update tgbotapi.Update) {
 }
 
 func (b *Bot) Start() {
+
+	log.Printf("Bot is running...")
+
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 

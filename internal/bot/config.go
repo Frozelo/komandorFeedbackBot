@@ -11,11 +11,11 @@ type Config struct {
 		ApiKey string `yaml:"apiKey"`
 	} `yaml:"bot"`
 	Database struct {
-		Host     string `yaml:"host"`
-		Port     int    `yaml:"port"`
-		User     string `yaml:"user"`
-		Password string `yaml:"password"`
-		Database string `yaml:"database"`
+		Host         string `yaml:"host"`
+		Port         int    `yaml:"port"`
+		User         string `yaml:"user"`
+		Password     string `yaml:"password"`
+		DatabaseName string `yaml:"db_name"`
 	}
 }
 

@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  bot:
+    image: "survey-bot:local"
+    container_name: survey-bot
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgresql
+
+  postgresql:
+    image: "postgres:15.6-alpine"
+    container_name: ps-psql-2
+    environment:
+      POSTGRES_DB: surveydb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "123123"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "2345:5432"
+
+volumes:
+  postgres_data:
