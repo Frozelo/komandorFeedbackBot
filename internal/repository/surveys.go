@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"fmt"
+	"log"
 
 	"github.com/Frozelo/komandorFeedbackBot/internal/domain/entity"
 	"github.com/jackc/pgx/v4"
@@ -30,7 +32,27 @@ func (r *SurveyRepository) CreateSurvey(survey entity.Survey) (*entity.Survey, e
 
 func (r *SurveyRepository) GetSurveyResults(userId int) ([]entity.Survey, error) {
 	query := `SELECT id, user_tg_id, question, answer FROM surveys WHERE user_tg_id = $1`
-	rows, err := r.db.Query(context.Background(), query, userId)
+
+	// Логируем запрос
+	log.Printf("Executing query: %s", query)
+
+	// Получаем план выполнения запроса
+	explainQuery := fmt.Sprintf("EXPLAIN ANALYZE %s", query)
+	rows, err := r.db.Query(context.Background(), explainQuery, userId)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var explainResult string
+		if err := rows.Scan(&explainResult); err != nil {
+			return nil, err
+		}
+		log.Printf("Query plan: %s", explainResult)
+	}
+
+	rows, err = r.db.Query(context.Background(), query, userId)
 	if err != nil {
 		return nil, err
 	}
