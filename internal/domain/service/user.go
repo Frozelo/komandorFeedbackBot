@@ -7,7 +7,8 @@ import (
 )
 
 type UserRepository interface {
-	CreateTgUser(user entity.User) (entity.User, error)
+	GetUserByTgId(tgId int) (*entity.User, error)
+	CreateTgUser(user entity.User) (*entity.User, error)
 }
 
 type UserService struct {
@@ -19,7 +20,14 @@ func NewUserService(repo UserRepository) *UserService {
 	return &UserService{repo: repo}
 }
 
-func (us *UserService) CreateUser(user entity.User) (entity.User, error) {
+func (us *UserService) FindUser(tgId int) (*entity.User, error) {
+	us.mu.Lock()
+	defer us.mu.Unlock()
+
+	return us.repo.GetUserByTgId(tgId)
+}
+
+func (us *UserService) CreateUser(user entity.User) (*entity.User, error) {
 	us.mu.Lock()
 	defer us.mu.Unlock()
 
