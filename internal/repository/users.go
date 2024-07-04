@@ -16,11 +16,11 @@ func NewUserRepository(db *pgx.Conn) *UserRepository {
 }
 
 func (r *UserRepository) CreateTgUser(user entity.User) (entity.User, error) {
-	query := `INSERT INTO users (tg_id, username, joined_at) VALUES ($1, $2, $3) RETURNING *`
-	row := r.db.QueryRow(context.Background(), query, user.TgId, user.Username, user.JoinedAt)
+	query := `INSERT INTO users (tg_id, username) VALUES ($1, $2) RETURNING id, tg_id, username`
+	row := r.db.QueryRow(context.Background(), query, user.TgId, user.Username)
 
 	var newUser entity.User
-	err := row.Scan(&newUser.Id, &newUser.TgId, &newUser.Username, &newUser.JoinedAt)
+	err := row.Scan(&newUser.Id, &newUser.TgId, &newUser.Username)
 	if err != nil {
 		return entity.User{}, err
 	}

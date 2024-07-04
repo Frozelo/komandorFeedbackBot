@@ -1,8 +1,7 @@
 package entity
 
 type User struct {
-	Id       int
-	TgId     int
-	Username string
-	JoinedAt string
+	Id       int    `json:"id"`
+	TgId     int    `json:"tg_id"`
+	Username string `json:"username"`
 }

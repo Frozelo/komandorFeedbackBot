@@ -2,7 +2,6 @@ package bot
 
 import (
 	"log"
-	"time"
 
 	"github.com/Frozelo/komandorFeedbackBot/internal/domain/entity"
 	"github.com/Frozelo/komandorFeedbackBot/internal/domain/service"
@@ -11,58 +10,31 @@ import (
 	"github.com/jackc/pgx/v4"
 )
 
-type Bot struct {
-	api           *tgbotapi.BotAPI
-	userService   *service.UserService
-	surveyService *service.SurveyService
+type BotConfig struct {
+	ApiKey string `yaml:"api_key"`
 }
 
-func NewBot(db *pgx.Conn, token string) (*Bot, error) {
-	api, err := tgbotapi.NewBotAPI(token)
+type Bot struct {
+	api         *tgbotapi.BotAPI
+	userService *service.UserService
+}
+
+func NewBot(db *pgx.Conn, apiKey string) (*Bot, error) {
+	bot, err := tgbotapi.NewBotAPI(apiKey)
 	if err != nil {
 		return nil, err
 	}
 
 	userRepo := repository.NewUserRepository(db)
-
-	api.Debug = true
+	userService := service.NewUserService(userRepo)
 
 	return &Bot{
-		api:           api,
-		userService:   service.NewUserService(userRepo),
-		surveyService: service.NewSurveyService(),
+		api:         bot,
+		userService: userService,
 	}, nil
 }
 
-func (b *Bot) handleMessage(update tgbotapi.Update) {
-	msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
-
-	switch update.Message.Text {
-	case "/start":
-		joinedAt := time.Unix(int64(update.Message.Date), 0).Format("2006-01-02")
-		newUser := entity.User{
-			TgId:     int(update.Message.From.ID),
-			Username: update.Message.From.UserName,
-			JoinedAt: joinedAt,
-		}
-		user, err := b.userService.CreateUser(newUser)
-
-		if err != nil {
-			msg.Text = "Ошибка при создании пользователя."
-			log.Printf("Error creating user: %v", err)
-
-		} else {
-			msg.Text = "Привет, " + user.Username + "! Ты уже зарегистрирован. Пришли мне /start_survey, чтобы начать опрос."
-		}
-		b.api.Send(msg)
-
-	}
-}
-
 func (b *Bot) Start() {
-
-	log.Printf("Bot is running...")
-
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 
@@ -73,4 +45,48 @@ func (b *Bot) Start() {
 			b.handleMessage(update)
 		}
 	}
+}
+
+func (b *Bot) handleMessage(update tgbotapi.Update) {
+	msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
+
+	switch update.Message.Text {
+	case "/start":
+		b.handleStart(update, msg)
+	case "/start_survey":
+		b.handleStartSurvey(update, msg)
+	case "/help":
+		b.handleHelp(update, msg)
+	default:
+		msg.Text = "Неизвестная команда. Напишите /help для списка доступных команд."
+		b.api.Send(msg)
+	}
+}
+
+func (b *Bot) handleStart(update tgbotapi.Update, msg tgbotapi.MessageConfig) {
+	newUser := entity.User{
+		TgId:     int(update.Message.From.ID),
+		Username: update.Message.From.UserName,
+	}
+	user, err := b.userService.CreateUser(newUser)
+
+	if err != nil {
+		msg.Text = "Ошибка при создании пользователя."
+		log.Printf("Error creating user: %v", err)
+	} else {
+		msg.Text = "Привет, " + user.Username + "! Ты уже зарегистрирован. Пришли мне /start_survey, чтобы начать опрос."
+	}
+	b.api.Send(msg)
+}
+
+func (b *Bot) handleStartSurvey(update tgbotapi.Update, msg tgbotapi.MessageConfig) {
+	msg.Text = "Опрос начат. Пожалуйста, ответьте на следующие вопросы..."
+	b.api.Send(msg)
+	panic("implement me")
+}
+
+func (b *Bot) handleHelp(update tgbotapi.Update, msg tgbotapi.MessageConfig) {
+	msg.Text = "Список доступных команд:\n/start - Регистрация пользователя\n/start_survey - Начать опрос\n/help - Список команд"
+	b.api.Send(msg)
+	panic("implement me")
 }
