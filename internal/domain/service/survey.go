@@ -1,85 +1,53 @@
 package service
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/Frozelo/komandorFeedbackBot/internal/domain/entity"
 )
 
+type SurveyRepository interface {
+	CreateSurvey(survey entity.Survey) (*entity.Survey, error)
+	GetSurveyResults(userId int) ([]entity.Survey, error)
+}
+
 type SurveyService struct {
-	mu      sync.Mutex
-	surveys map[int]*entity.Survey
+	mu   sync.Mutex
+	repo SurveyRepository
 }
 
-func NewSurveyService() *SurveyService {
-	return &SurveyService{surveys: make(map[int]*entity.Survey)}
+func NewSurveyService(repo SurveyRepository) *SurveyService {
+	return &SurveyService{repo: repo}
 }
 
-func (ss *SurveyService) StartSurvey(chatId int) {
-	ss.mu.Lock()
-	defer ss.mu.Unlock()
-
-	ss.surveys[chatId] = &entity.Survey{
-		Questions: []entity.Question{
-			{Text: "Как вам наш продукт?", Answered: false},
-			{Text: "Какие функции вы бы хотели видеть?", Answered: false},
-		},
-	}
-}
-
-func (ss *SurveyService) GetNextQuestion(chatId int) *entity.Question {
-	ss.mu.Lock()
-
-	defer ss.mu.Unlock()
-
-	survey, exists := ss.surveys[chatId]
-
-	if !exists {
-		return nil
-	}
-
-	for i, q := range survey.Questions {
-		if !q.Answered {
-			return &survey.Questions[i]
-		}
-	}
-
-	return nil
-}
-
-func (s *SurveyService) AnswerQuestion(chatID int, answer string) {
+func (s *SurveyService) CreateSurvey(survey entity.Survey) (*entity.Survey, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	survey, exists := s.surveys[chatID]
-	if !exists {
-		return
-	}
-
-	for i, q := range survey.Questions {
-		if !q.Answered {
-			survey.Questions[i].Answered = true
-			survey.Questions[i].Answer = answer
-			break
-		}
-	}
+	return s.repo.CreateSurvey(survey)
 }
 
-func (s *SurveyService) GetSurveyResults(chatID int) string {
+func (s *SurveyService) GetSurveyResults(userId int) ([]entity.Survey, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	survey, exists := s.surveys[chatID]
+	return s.repo.GetSurveyResults(userId)
+}
 
-	if !exists {
-		return "Результат не найдены."
-	}
-	results := ""
-
-	for _, q := range survey.Questions {
-		results += fmt.Sprintf("%s: %s\n", q.Text, q.Answer)
+func (s *SurveyService) CalculateAverageScore(userId int) (float64, error) {
+	surveys, err := s.GetSurveyResults(userId)
+	if err != nil {
+		return 0, err
 	}
 
-	return results
+	if len(surveys) == 0 {
+		return 0, nil
+	}
+
+	var totalScore int
+	for _, survey := range surveys {
+		totalScore += survey.Answer
+	}
+
+	return float64(totalScore) / float64(len(surveys)), nil
 }
