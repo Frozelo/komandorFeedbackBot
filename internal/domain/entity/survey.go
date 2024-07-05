@@ -1,8 +1,15 @@
 package entity
 
 type Survey struct {
+	Id        int
+	UserId    int
+	Questions []Question
+	AvgScore  float64
+}
+
+type Question struct {
 	Id       int
-	UserId   int
-	Question string
+	SurveyId int
+	Text     string
 	Answer   int
 }

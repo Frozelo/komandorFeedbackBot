@@ -2,8 +2,6 @@ package repository
 
 import (
 	"context"
-	"fmt"
-	"log"
 
 	"github.com/Frozelo/komandorFeedbackBot/internal/domain/entity"
 	"github.com/jackc/pgx/v4"
@@ -18,54 +16,102 @@ func NewSurveyRepository(db *pgx.Conn) *SurveyRepository {
 }
 
 func (r *SurveyRepository) CreateSurvey(survey entity.Survey) (*entity.Survey, error) {
-	query := `INSERT INTO surveys (user_tg_id, question, answer) VALUES ($1, $2, $3) RETURNING id, user_tg_id, question, answer`
-	row := r.db.QueryRow(context.Background(), query, survey.UserId, survey.Question, survey.Answer)
-
-	var newSurvey entity.Survey
-	err := row.Scan(&newSurvey.Id, &newSurvey.UserId, &newSurvey.Question, &newSurvey.Answer)
+	tx, err := r.db.Begin(context.Background())
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback(context.Background())
 
-	return &newSurvey, nil
+	query := `INSERT INTO surveys (user_id) VALUES ($1) RETURNING id`
+	row := tx.QueryRow(context.Background(), query, survey.UserId)
+
+	var surveyId int
+	if err := row.Scan(&surveyId); err != nil {
+		return nil, err
+	}
+	survey.Id = surveyId
+
+	for i, question := range survey.Questions {
+		query := `INSERT INTO questions (survey_id, text) VALUES ($1, $2) RETURNING id`
+		row := tx.QueryRow(context.Background(), query, surveyId, question.Text)
+		var questionId int
+		if err := row.Scan(&questionId); err != nil {
+			return nil, err
+		}
+		survey.Questions[i].Id = questionId
+	}
+
+	if err := tx.Commit(context.Background()); err != nil {
+		return nil, err
+	}
+
+	return &survey, nil
 }
 
-func (r *SurveyRepository) GetSurveyResults(userId int) ([]entity.Survey, error) {
-	query := `SELECT id, user_tg_id, question, answer FROM surveys WHERE user_tg_id = $1`
+func (r *SurveyRepository) UpdateQuestionAnswer(questionId int, answer int) error {
+	query := `UPDATE questions SET answer = $1 WHERE id = $2`
+	_, err := r.db.Exec(context.Background(), query, answer, questionId)
+	return err
+}
 
-	// Логируем запрос
-	log.Printf("Executing query: %s", query)
+func (r *SurveyRepository) GetSurveyQuestion(questionId int) (*entity.Question, error) {
+	query := `SELECT id, survey_id, text, answer FROM questions WHERE id = $1`
+	row := r.db.QueryRow(context.Background(), query, questionId)
 
-	// Получаем план выполнения запроса
-	explainQuery := fmt.Sprintf("EXPLAIN ANALYZE %s", query)
-	rows, err := r.db.Query(context.Background(), explainQuery, userId)
+	var question entity.Question
+	err := row.Scan(&question.Id, &question.SurveyId, &question.Text, &question.Answer)
+	if err != nil {
+		return nil, err
+	}
+
+	return &question, nil
+}
+
+func (r *SurveyRepository) GetSurvey(surveyId int) (*entity.Survey, error) {
+	query := `SELECT id, user_id FROM surveys WHERE id = $1`
+	row := r.db.QueryRow(context.Background(), query, surveyId)
+
+	var survey entity.Survey
+	err := row.Scan(&survey.Id, &survey.UserId)
+	if err != nil {
+		return nil, err
+	}
+
+	query = `SELECT id, survey_id, text, answer FROM questions WHERE survey_id = $1`
+	rows, err := r.db.Query(context.Background(), query, surveyId)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
+	var questions []entity.Question
 	for rows.Next() {
-		var explainResult string
-		if err := rows.Scan(&explainResult); err != nil {
+		var question entity.Question
+		if err := rows.Scan(&question.Id, &question.SurveyId, &question.Text, &question.Answer); err != nil {
 			return nil, err
 		}
-		log.Printf("Query plan: %s", explainResult)
+		questions = append(questions, question)
 	}
+	survey.Questions = questions
 
-	rows, err = r.db.Query(context.Background(), query, userId)
+	return &survey, nil
+}
+
+func (r *SurveyRepository) CalculateAverageScore(surveyId int) (float64, error) {
+	query := `SELECT AVG(answer) FROM questions WHERE survey_id = $1`
+	row := r.db.QueryRow(context.Background(), query, surveyId)
+
+	var averageScore float64
+	err := row.Scan(&averageScore)
 	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var surveys []entity.Survey
-	for rows.Next() {
-		var survey entity.Survey
-		if err := rows.Scan(&survey.Id, &survey.UserId, &survey.Question, &survey.Answer); err != nil {
-			return nil, err
-		}
-		surveys = append(surveys, survey)
+		return 0, err
 	}
 
-	return surveys, nil
+	return averageScore, nil
+}
+
+func (r *SurveyRepository) SaveAvgScore(surveyId int, avgScore float64) error {
+	query := `UPDATE surveys SET avg_score  =  $1 WHERE id  =  $2`
+	_, err := r.db.Exec(context.Background(), query, avgScore, surveyId)
+	return err
 }

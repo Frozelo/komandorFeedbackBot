@@ -8,12 +8,16 @@ import (
 
 type SurveyRepository interface {
 	CreateSurvey(survey entity.Survey) (*entity.Survey, error)
-	GetSurveyResults(userId int) ([]entity.Survey, error)
+	UpdateQuestionAnswer(questionId int, answer int) error
+	GetSurveyQuestion(questionId int) (*entity.Question, error)
+	GetSurvey(surveyId int) (*entity.Survey, error)
+	CalculateAverageScore(surveyId int) (float64, error)
+	SaveAvgScore(surveyId int, avgScore float64) error
 }
 
 type SurveyService struct {
-	mu   sync.Mutex
 	repo SurveyRepository
+	mu   sync.Mutex
 }
 
 func NewSurveyService(repo SurveyRepository) *SurveyService {
@@ -27,27 +31,38 @@ func (s *SurveyService) CreateSurvey(survey entity.Survey) (*entity.Survey, erro
 	return s.repo.CreateSurvey(survey)
 }
 
-func (s *SurveyService) GetSurveyResults(userId int) ([]entity.Survey, error) {
+func (s *SurveyService) UpdateQuestionAnswer(questionId int, answer int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.repo.GetSurveyResults(userId)
+	return s.repo.UpdateQuestionAnswer(questionId, answer)
 }
 
-func (s *SurveyService) CalculateAverageScore(userId int) (float64, error) {
-	surveys, err := s.GetSurveyResults(userId)
-	if err != nil {
-		return 0, err
-	}
+func (s *SurveyService) GetSurveyQuestion(questionId int) (*entity.Question, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	if len(surveys) == 0 {
-		return 0, nil
-	}
+	return s.repo.GetSurveyQuestion(questionId)
+}
 
-	var totalScore int
-	for _, survey := range surveys {
-		totalScore += survey.Answer
-	}
+func (s *SurveyService) GetSurvey(surveyId int) (*entity.Survey, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	return float64(totalScore) / float64(len(surveys)), nil
+	return s.repo.GetSurvey(surveyId)
+}
+
+func (s *SurveyService) CalculateAverageScore(surveyId int) (float64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.repo.CalculateAverageScore(surveyId)
+}
+
+func (s *SurveyService) SaveAvgScore(surveyId int, avgScore float64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.repo.SaveAvgScore(surveyId, avgScore)
+
 }
