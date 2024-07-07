@@ -13,10 +13,6 @@ import (
 	"github.com/jackc/pgx/v4"
 )
 
-type BotConfig struct {
-	ApiKey string `yaml:"api_key"`
-}
-
 type Bot struct {
 	api           *tgbotapi.BotAPI
 	userService   *service.UserService
@@ -31,6 +27,7 @@ func NewBot(db *pgx.Conn, apiKey string) (*Bot, error) {
 
 	userRepo := repository.NewUserRepository(db)
 	userService := service.NewUserService(userRepo)
+
 	surveyRepo := repository.NewSurveyRepository(db)
 	surveyService := service.NewSurveyService(surveyRepo)
 
@@ -49,21 +46,20 @@ func (b *Bot) Start() {
 
 	for update := range updates {
 		if update.Message != nil {
-			b.handleCommand(update)
-		}
-		if update.CallbackQuery != nil {
-			b.handleCallbackQuery(update)
+			b.handleMessage(update)
+		} else if update.CallbackQuery != nil {
+			b.handleCallback(update)
 		}
 	}
 }
 
-func (b *Bot) handleCommand(update tgbotapi.Update) {
+func (b *Bot) handleMessage(update tgbotapi.Update) {
 	msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
 
-	switch update.Message.Command() {
-	case "start":
-		b.handleStart(update)
-	case "survey":
+	switch update.Message.Text {
+	case "/start":
+		b.handleStart(update, msg)
+	case "/start_survey":
 		b.handleStartSurvey(update, msg)
 	default:
 		msg.Text = "Неизвестная команда. Напишите /help для списка доступных команд."
@@ -71,7 +67,7 @@ func (b *Bot) handleCommand(update tgbotapi.Update) {
 	}
 }
 
-func (b *Bot) handleStart(update tgbotapi.Update) {
+func (b *Bot) handleStart(update tgbotapi.Update, msg tgbotapi.MessageConfig) {
 	log.Printf("handleStart called with update: %v", update)
 
 	newUser := entity.User{
@@ -81,172 +77,208 @@ func (b *Bot) handleStart(update tgbotapi.Update) {
 
 	log.Printf("Constructed newUser: %v", newUser)
 
-	existingUser, err := b.findUserByTgId(newUser.TgId)
-	log.Printf("Existing user check completed, existingUser: %v, err: %v", existingUser, err)
+	foundUser, err := b.userService.FindUser(newUser.TgId)
 	if err != nil {
-		log.Printf("Error finding user by TgId: %v", err)
-		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Произошла ошибка. Пожалуйста, попробуйте еще раз.")
+		log.Printf("Error finding user: %v", err)
+		msg.Text = "Произошла ошибка при проверке пользователя."
 		b.api.Send(msg)
 		return
 	}
 
-	if existingUser != nil {
-		log.Printf("Existing user found: %v", existingUser)
-		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Вы уже зарегистрированы. Ваш никнейм: "+existingUser.Username)
-		b.api.Send(msg)
-		return
+	if foundUser == nil {
+		createdUser, err := b.userService.CreateUser(newUser)
+		if err != nil {
+			log.Printf("Error registering new user: %v", err)
+			msg.Text = "Произошла ошибка при регистрации пользователя."
+			b.api.Send(msg)
+			return
+		}
+		log.Printf("New user registered successfully: %v", createdUser)
+		msg.Text = "Привет, " + createdUser.Username + "! Ты успешно зарегистрирован. Пришли мне /start_survey, чтобы начать опрос."
+	} else {
+		msg.Text = "Привет, " + foundUser.Username + "! Ты уже зарегистрирован. Пришли мне /start_survey, чтобы начать опрос."
 	}
-
-	log.Printf("No existing user found, proceeding to register new user")
-
-	createdUser, err := b.registerNewUser(newUser)
-	log.Printf("User registration completed, createdUser: %v, err: %v", createdUser, err)
-	if err != nil {
-		log.Printf("Error registering new user: %v", err)
-		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Произошла ошибка при регистрации. Пожалуйста, попробуйте еще раз.")
-		b.api.Send(msg)
-		return
-	}
-
-	log.Printf("New user registered successfully: %v", createdUser)
-
-	msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Привет, "+createdUser.Username+"! Ты успешно зарегистрирован. Пришли мне /start_survey, чтобы начать опрос.")
 	b.api.Send(msg)
 }
 
 func (b *Bot) handleStartSurvey(update tgbotapi.Update, msg tgbotapi.MessageConfig) {
-	questions := []entity.Question{
-		{Text: "Как вы оцениваете качество нашего сервиса от 0 до 5?"},
-		{Text: "Насколько вы довольны нашим продуктом от 0 до 5?"},
-	}
-
-	survey := entity.Survey{
-		UserId:    int(update.Message.From.ID),
-		Questions: questions,
-	}
-
-	createdSurvey, err := b.surveyService.CreateSurvey(survey)
+	categories, err := b.surveyService.GetCategories()
 	if err != nil {
-		msg.Text = "Ошибка при создании опроса. Попробуйте еще раз."
+		log.Printf("Error fetching categories: %v", err)
+		msg.Text = "Произошла ошибка при получении категорий. Попробуйте еще раз."
 		b.api.Send(msg)
 		return
 	}
 
-	msg.Text = "Опрос начат. Пожалуйста, ответьте на следующие вопросы:"
-	b.api.Send(msg)
+	if len(categories) == 0 {
+		msg.Text = "Нет доступных категорий для опроса."
+		b.api.Send(msg)
+		return
+	}
 
-	for _, question := range createdSurvey.Questions {
-		b.sendQuestion(update.Message.Chat.ID, question)
+	var keyboard [][]tgbotapi.InlineKeyboardButton
+	for _, category := range categories {
+		callbackData := fmt.Sprintf("category:%d", category.Id)
+		button := tgbotapi.NewInlineKeyboardButtonData(category.Name, callbackData)
+		keyboard = append(keyboard, tgbotapi.NewInlineKeyboardRow(button))
+	}
+
+	replyMarkup := tgbotapi.NewInlineKeyboardMarkup(keyboard...)
+	msg.Text = "Выберите категорию для опроса:"
+	msg.ReplyMarkup = replyMarkup
+
+	b.api.Send(msg)
+}
+
+func (b *Bot) handleCallback(update tgbotapi.Update) {
+	callbackData := update.CallbackQuery.Data
+
+	parts := strings.Split(callbackData, ":")
+	if len(parts) < 2 {
+		msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Неверный формат данных колбэка.")
+		b.api.Send(msg)
+		return
+	}
+
+	switch parts[0] {
+	case "category":
+		categoryID, err := strconv.Atoi(parts[1])
+		if err != nil {
+			msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Неверный формат ID категории.")
+			b.api.Send(msg)
+			return
+		}
+		b.handleCategorySelection(update, categoryID)
+	case "question":
+		if len(parts) != 4 {
+			msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Неверный формат данных колбэка.")
+			b.api.Send(msg)
+			return
+		}
+		surveyID, err := strconv.Atoi(parts[1])
+		if err != nil {
+			msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Неверный формат ID опроса.")
+			b.api.Send(msg)
+			return
+		}
+		questionID, err := strconv.Atoi(parts[2])
+		if err != nil {
+			msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Неверный формат ID вопроса.")
+			b.api.Send(msg)
+			return
+		}
+		answer, err := strconv.Atoi(parts[3])
+		if err != nil {
+			msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Неверный формат ответа.")
+			b.api.Send(msg)
+			return
+		}
+		b.handleAnswer(update, surveyID, questionID, answer)
 	}
 }
 
-func (b *Bot) sendQuestion(chatId int64, question entity.Question) {
-	callbackButtons := make([]tgbotapi.InlineKeyboardButton, 6)
-	for i := 0; i <= 5; i++ {
-		callbackButtons[i] = tgbotapi.NewInlineKeyboardButtonData(strconv.Itoa(i), fmt.Sprintf("%d:%d", question.Id, i))
+func (b *Bot) handleCategorySelection(update tgbotapi.Update, categoryID int) {
+	msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "")
+	questions, err := b.surveyService.GetQuestionsByCategory(categoryID)
+	if err != nil {
+		log.Printf("Error fetching questions: %v", err)
+		msg.Text = "Произошла ошибка при получении вопросов. Попробуйте еще раз."
+		b.api.Send(msg)
+		return
 	}
-	msg := tgbotapi.NewMessage(chatId, question.Text)
-	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(callbackButtons...))
+
+	if len(questions) == 0 {
+		msg.Text = "Нет доступных вопросов для выбранной категории."
+		b.api.Send(msg)
+		return
+	}
+
+	// Создать новый опрос
+	newSurvey := entity.Survey{
+		UserId: int(update.CallbackQuery.From.ID),
+	}
+	createdSurvey, err := b.surveyService.CreateSurvey(newSurvey)
+	if err != nil {
+		log.Printf("Error creating new survey: %v", err)
+		msg.Text = "Произошла ошибка при создании нового опроса. Попробуйте еще раз."
+		b.api.Send(msg)
+		return
+	}
+
+	// Отредактировать сообщение о выборе категории на новый текст
+	editMsg := tgbotapi.NewEditMessageText(update.CallbackQuery.Message.Chat.ID, update.CallbackQuery.Message.MessageID, "Выбрана категория для опроса.")
+
+	// Показать первый вопрос
+	firstQuestion := questions[0]
+	b.sendQuestion(update, createdSurvey.Id, firstQuestion)
+
+	// Отправить запрос на редактирование сообщения
+	b.api.Send(editMsg)
+}
+
+func (b *Bot) sendQuestion(update tgbotapi.Update, surveyID int, question entity.Question) {
+	msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, question.Text)
+
+	var keyboard [][]tgbotapi.InlineKeyboardButton
+	for i := 1; i <= 5; i++ {
+		callbackData := fmt.Sprintf("question:%d:%d:%d", surveyID, question.Id, i)
+		button := tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("%d", i), callbackData)
+		keyboard = append(keyboard, tgbotapi.NewInlineKeyboardRow(button))
+	}
+
+	replyMarkup := tgbotapi.NewInlineKeyboardMarkup(keyboard...)
+	msg.ReplyMarkup = replyMarkup
+
 	b.api.Send(msg)
 }
 
-func (b *Bot) handleCallbackQuery(update tgbotapi.Update) {
-	callbackQuery := update.CallbackQuery
-	data := callbackQuery.Data
-	parts := strings.Split(data, ":")
-	if len(parts) != 2 {
-		log.Printf("Invalid callback data: %v", data)
-		return
-	}
-
-	questionId, err := strconv.Atoi(parts[0])
+func (b *Bot) handleAnswer(update tgbotapi.Update, surveyID, questionID, answer int) {
+	err := b.surveyService.SaveAnswer(entity.Answer{
+		SurveyID:   surveyID,
+		QuestionID: questionID,
+		Answer:     answer,
+	})
 	if err != nil {
-		log.Printf("Invalid question ID: %v", parts[0])
+		msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Произошла ошибка при сохранении ответа.")
+		b.api.Send(msg)
 		return
 	}
 
-	answer, err := strconv.Atoi(parts[1])
+	questions, err := b.surveyService.GetQuestionsByCategory(2)
+	fmt.Printf("Questions is %v", questions)
 	if err != nil {
-		log.Printf("Invalid answer: %v", parts[1])
+		msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Произошла ошибка при получении вопросов.")
+		b.api.Send(msg)
 		return
 	}
 
-	err = b.surveyService.UpdateQuestionAnswer(questionId, answer)
-	if err != nil {
-		log.Printf("Error updating question answer: %v", err)
-		callback := tgbotapi.NewCallback(callbackQuery.ID, "Ошибка при сохранении ответа. Попробуйте еще раз.")
-		b.api.Request(callback)
-		return
-	}
-
-	callback := tgbotapi.NewCallback(callbackQuery.ID, "Ваш ответ сохранен. Спасибо за участие!")
-	b.api.Request(callback)
-
-	question, err := b.surveyService.GetSurveyQuestion(questionId)
-	if err != nil {
-		log.Printf("Error getting question: %v", err)
-		return
-	}
-
-	survey, err := b.surveyService.GetSurvey(question.SurveyId)
-	if err != nil {
-		log.Printf("Error getting survey: %v", err)
-		return
-	}
-
-	allAnswered := true
-	for _, q := range survey.Questions {
-		if q.Answer == 0 {
-			allAnswered = false
-			b.sendQuestion(callbackQuery.Message.Chat.ID, q)
+	var nextQuestion *entity.Question
+	for i, question := range questions {
+		if question.Id == questionID && i+1 < len(questions) {
+			nextQuestion = &questions[i+1]
 			break
 		}
 	}
 
-	if allAnswered {
-		msg := tgbotapi.NewMessage(callbackQuery.Message.Chat.ID, "")
-		averageScore, err := b.surveyService.CalculateAverageScore(survey.Id)
+	if nextQuestion != nil {
+
+		b.sendQuestion(update, surveyID, *nextQuestion)
+	} else {
+		avgScore, err := b.surveyService.CalculateAverageScore(surveyID)
 		if err != nil {
-			log.Printf("Error calculating average score: %v", err)
-			msg.Text = "Ошибка при вычислении среднего результата. Попробуйте еще раз."
+			msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Произошла ошибка при расчете среднего балла.")
 			b.api.Send(msg)
 			return
 		}
-		err = b.surveyService.SaveAvgScore(survey.Id, averageScore)
 
+		err = b.surveyService.SaveAvgScore(surveyID, avgScore)
 		if err != nil {
-			log.Printf("Error saving average score: %v", err)
-			msg.Text = "Ошибка при сохранении среднего результата. Попробуйте еще раз."
+			msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Произошла ошибка при сохранении среднего балла.")
 			b.api.Send(msg)
 			return
-
 		}
 
-		msg.Text = fmt.Sprintf("Средняя оценка вашего опроса: %.2f", averageScore)
+		msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, fmt.Sprintf("Опрос завершен! Ваш средний балл: %.2f", avgScore))
 		b.api.Send(msg)
 	}
-}
-
-func (b *Bot) findUserByTgId(tgId int) (*entity.User, error) {
-	log.Printf("findUserByTgId called with tgId: %d", tgId)
-	existingUser, err := b.userService.FindUser(tgId)
-	if err != nil {
-		log.Printf("Error fetching user: %v", err)
-		return nil, err
-	}
-
-	log.Printf("User found: %v", existingUser)
-	return existingUser, nil
-}
-
-func (b *Bot) registerNewUser(newUser entity.User) (*entity.User, error) {
-	log.Printf("registerNewUser called with newUser: %v", newUser)
-	createdUser, err := b.userService.CreateUser(newUser)
-	if err != nil {
-		log.Printf("Error creating user: %v", err)
-		return nil, err
-	}
-
-	log.Printf("User created: %v", createdUser)
-	return createdUser, nil
 }

@@ -16,7 +16,7 @@ type Config struct {
 		User         string `yaml:"user"`
 		Password     string `yaml:"password"`
 		DatabaseName string `yaml:"db_name"`
-	}
+	} `yaml:"database"`
 }
 
 func NewConfig(configPath string) (*Config, error) {

@@ -13,6 +13,9 @@ type SurveyRepository interface {
 	GetSurvey(surveyId int) (*entity.Survey, error)
 	CalculateAverageScore(surveyId int) (float64, error)
 	SaveAvgScore(surveyId int, avgScore float64) error
+	GetCategories() ([]entity.Category, error)
+	GetQuestionsByCategory(categoryID int) ([]entity.Question, error)
+	SaveAnswer(answer entity.Answer) error
 }
 
 type SurveyService struct {
@@ -64,5 +67,25 @@ func (s *SurveyService) SaveAvgScore(surveyId int, avgScore float64) error {
 	defer s.mu.Unlock()
 
 	return s.repo.SaveAvgScore(surveyId, avgScore)
+}
 
+func (s *SurveyService) GetCategories() ([]entity.Category, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.repo.GetCategories()
+}
+
+func (s *SurveyService) GetQuestionsByCategory(categoryID int) ([]entity.Question, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.repo.GetQuestionsByCategory(categoryID)
+}
+
+func (s *SurveyService) SaveAnswer(answer entity.Answer) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.repo.SaveAnswer(answer)
 }
