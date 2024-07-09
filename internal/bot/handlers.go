@@ -17,6 +17,8 @@ type Bot struct {
 	api           *tgbotapi.BotAPI
 	userService   *service.UserService
 	surveyService *service.SurveyService
+	// TODO I dont like this. need to add repository with question and survey logic
+	selectedCategoryId int
 }
 
 func NewBot(db *pgx.Conn, apiKey string) (*Bot, error) {
@@ -143,6 +145,7 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 	switch parts[0] {
 	case "category":
 		categoryID, err := strconv.Atoi(parts[1])
+		b.selectedCategoryId = categoryID
 		if err != nil {
 			msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Неверный формат ID категории.")
 			b.api.Send(msg)
@@ -244,7 +247,7 @@ func (b *Bot) handleAnswer(update tgbotapi.Update, surveyID, questionID, answer 
 		return
 	}
 
-	questions, err := b.surveyService.GetQuestionsByCategory(2)
+	questions, err := b.surveyService.GetQuestionsByCategory(b.selectedCategoryId)
 	fmt.Printf("Questions is %v", questions)
 	if err != nil {
 		msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Произошла ошибка при получении вопросов.")
@@ -278,7 +281,7 @@ func (b *Bot) handleAnswer(update tgbotapi.Update, surveyID, questionID, answer 
 			return
 		}
 
-		msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, fmt.Sprintf("Опрос завершен! Ваш средний балл: %.2f", avgScore))
+		msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Опрос завершен! Спасибо за прохождение. Мы сохранили ваши ответы и обязательно учтём их")
 		b.api.Send(msg)
 	}
 }
