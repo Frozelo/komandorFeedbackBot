@@ -17,8 +17,6 @@ type Bot struct {
 	api           *tgbotapi.BotAPI
 	userService   *service.UserService
 	surveyService *service.SurveyService
-	// TODO I dont like this. need to add repository with question and survey logic
-	selectedCategoryId int
 }
 
 func NewBot(db *pgx.Conn, apiKey string) (*Bot, error) {
@@ -145,7 +143,6 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 	switch parts[0] {
 	case "category":
 		categoryID, err := strconv.Atoi(parts[1])
-		b.selectedCategoryId = categoryID
 		if err != nil {
 			msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Неверный формат ID категории.")
 			b.api.Send(msg)
@@ -211,9 +208,10 @@ func (b *Bot) handleCategorySelection(update tgbotapi.Update, categoryID int) {
 	// Отредактировать сообщение о выборе категории на новый текст
 	editMsg := tgbotapi.NewEditMessageText(update.CallbackQuery.Message.Chat.ID, update.CallbackQuery.Message.MessageID, "Выбрана категория для опроса.")
 
-	// Показать первый вопрос
-	firstQuestion := questions[0]
-	b.sendQuestion(update, createdSurvey.Id, firstQuestion)
+	// Отправить все вопросы
+	for _, question := range questions {
+		b.sendQuestion(update, createdSurvey.Id, question)
+	}
 
 	// Отправить запрос на редактирование сообщения
 	b.api.Send(editMsg)
@@ -247,41 +245,21 @@ func (b *Bot) handleAnswer(update tgbotapi.Update, surveyID, questionID, answer 
 		return
 	}
 
-	questions, err := b.surveyService.GetQuestionsByCategory(b.selectedCategoryId)
-	fmt.Printf("Questions is %v", questions)
+	// Calculate the average score and save it if it's the last question
+	avgScore, err := b.surveyService.CalculateAverageScore(surveyID)
 	if err != nil {
-		msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Произошла ошибка при получении вопросов.")
+		msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Произошла ошибка при расчете среднего балла.")
 		b.api.Send(msg)
 		return
 	}
 
-	var nextQuestion *entity.Question
-	for i, question := range questions {
-		if question.Id == questionID && i+1 < len(questions) {
-			nextQuestion = &questions[i+1]
-			break
-		}
-	}
-
-	if nextQuestion != nil {
-
-		b.sendQuestion(update, surveyID, *nextQuestion)
-	} else {
-		avgScore, err := b.surveyService.CalculateAverageScore(surveyID)
-		if err != nil {
-			msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Произошла ошибка при расчете среднего балла.")
-			b.api.Send(msg)
-			return
-		}
-
-		err = b.surveyService.SaveAvgScore(surveyID, avgScore)
-		if err != nil {
-			msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Произошла ошибка при сохранении среднего балла.")
-			b.api.Send(msg)
-			return
-		}
-
-		msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Опрос завершен! Спасибо за прохождение. Мы сохранили ваши ответы и обязательно учтём их")
+	err = b.surveyService.SaveAvgScore(surveyID, avgScore)
+	if err != nil {
+		msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Произошла ошибка при сохранении среднего балла.")
 		b.api.Send(msg)
+		return
 	}
+
+	msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, fmt.Sprintf("Опрос завершен! Ваш средний балл: %.2f", avgScore))
+	b.api.Send(msg)
 }
